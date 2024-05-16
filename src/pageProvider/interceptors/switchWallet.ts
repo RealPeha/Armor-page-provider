@@ -10,7 +10,7 @@ export const switchWalletNotice = (type: "rabby" | "metamask") => {
     return;
   }
   const titles = {
-    rabby: "Rabby",
+    rabby: "Armor",
     metamask: "MetaMask",
   };
   if (instance) {
