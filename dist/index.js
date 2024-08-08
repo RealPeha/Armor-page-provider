@@ -4,6 +4,7 @@ Object.defineProperty(exports, '__esModule', { value: true });
 
 var events = require('events');
 var ethRpcErrors = require('eth-rpc-errors');
+var postMessageStream = require('@metamask/post-message-stream');
 
 /**
  * this script is live in content-script / dapp's page
@@ -67,42 +68,47 @@ class Message extends events.EventEmitter {
 }
 
 class BroadcastChannelMessage extends Message {
-    constructor(name) {
+    constructor({ name, target }) {
         super();
         this.connect = () => {
-            this._channel.onmessage = ({ data: { type, data } }) => {
-                if (type === 'message') {
-                    this.emit('message', data);
+            this._channel.on("data", ({ data: { type, data } }) => {
+                if (type === "message") {
+                    this.emit("message", data);
                 }
-                else if (type === 'response') {
+                else if (type === "response") {
                     this.onResponse(data);
                 }
-            };
+            });
             return this;
         };
         this.listen = (listenCallback) => {
             this.listenCallback = listenCallback;
-            this._channel.onmessage = ({ data: { type, data } }) => {
-                if (type === 'request') {
+            this._channel.on("data", ({ data: { type, data } }) => {
+                if (type === "request") {
                     this.onRequest(data);
                 }
-            };
+            });
             return this;
         };
         this.send = (type, data) => {
-            this._channel.postMessage({
-                type,
-                data,
+            this._channel.write({
+                data: {
+                    type,
+                    data,
+                },
             });
         };
         this.dispose = () => {
             this._dispose();
-            this._channel.close();
+            this._channel.destroy();
         };
-        if (!name) {
-            throw new Error('the broadcastChannel name is missing');
+        if (!name || !target) {
+            throw new Error("the broadcastChannel name or target is missing");
         }
-        this._channel = new BroadcastChannel(name);
+        this._channel = new postMessageStream.WindowPostMessageStream({
+            name,
+            target,
+        });
     }
 }
 
@@ -180,6 +186,10 @@ const domReadyCall = (callback) => {
     }
 };
 const $ = document.querySelector.bind(document);
+function genUUID() {
+    return "10000000-1000-4000-8000-100000000000".replace(/[018]/g, (c) => (+c ^
+        (crypto.getRandomValues(new Uint8Array(1))[0] & (15 >> (+c / 4)))).toString(16));
+}
 
 class ReadyPromise {
     constructor(count) {
@@ -547,31 +557,8 @@ const log = (event, ...args) => {
         console.log(`%c [rabby] (${new Date().toTimeString().substr(0, 8)}) ${event}`, "font-weight: bold; background-color: #7d6ef9; color: white;", ...args);
     }
 };
-let channelName = typeof __rabby__channelName !== "undefined" ? __rabby__channelName : "";
-typeof __rabby__isDefaultWallet !== "undefined"
-    ? __rabby__isDefaultWallet
-    : false;
-let isOpera = typeof __rabby__isOpera !== "undefined" ? __rabby__isOpera : false;
-let uuid = typeof __rabby__uuid !== "undefined" ? __rabby__uuid : "";
-const getParams = () => {
-    if (localStorage.getItem("rabby:channelName")) {
-        channelName = localStorage.getItem("rabby:channelName");
-        localStorage.removeItem("rabby:channelName");
-    }
-    if (localStorage.getItem("rabby:isDefaultWallet")) {
-        localStorage.getItem("rabby:isDefaultWallet") === "true";
-        localStorage.removeItem("rabby:isDefaultWallet");
-    }
-    if (localStorage.getItem("rabby:uuid")) {
-        uuid = localStorage.getItem("rabby:uuid");
-        localStorage.removeItem("rabby:uuid");
-    }
-    if (localStorage.getItem("rabby:isOpera")) {
-        isOpera = localStorage.getItem("rabby:isOpera") === "true";
-        localStorage.removeItem("rabby:isOpera");
-    }
-};
-getParams();
+let isOpera = /Opera|OPR\//i.test(navigator.userAgent);
+let uuid = genUUID();
 class EthereumProvider extends events.EventEmitter {
     constructor({ maxListeners = 100 } = {}) {
         super();
@@ -607,7 +594,10 @@ class EthereumProvider extends events.EventEmitter {
         };
         this._requestPromise = new ReadyPromise(2);
         this._dedupePromise = new DedupePromise([]);
-        this._bcm = new BroadcastChannelMessage(channelName);
+        this._bcm = new BroadcastChannelMessage({
+            name: "rabby-page-provider",
+            target: "rabby-content-script",
+        });
         this.initialize = async () => {
             document.addEventListener("visibilitychange", this._requestPromiseCheckVisibility);
             this._bcm.connect().on("message", this._handleBackgroundMessage);

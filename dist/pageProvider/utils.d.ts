@@ -5,3 +5,4 @@ declare const $: {
     <E extends Element = Element>(selectors: string): E | null;
 };
 export { domReadyCall, $ };
+export declare function genUUID(): string;
